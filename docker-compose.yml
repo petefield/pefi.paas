@@ -1,0 +1,79 @@
+services:
+
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - pefi-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "15672:15672"
+    networks:
+      - pefi-network
+
+  servicemanager:
+    image: ghcr.io/petefield/pefi.servicemanager:latest
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - rabbitmq
+    environment:
+      Persistance__connectionstring: mongodb://mongo:27017
+      Messaging__username: ${RABBITMQ_USER:-guest}
+      Messaging__password: ${RABBITMQ_PASS:-guest}
+      Messaging__address: rabbitmq
+    ports:
+      - "9090:9090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - pefi-network
+
+  proxy:
+    image: ghcr.io/petefield/pefi.proxy:latest
+    restart: unless-stopped
+    depends_on:
+      - rabbitmq
+      - servicemanager
+    environment:
+      Messaging__username: ${RABBITMQ_USER:-guest}
+      Messaging__password: ${RABBITMQ_PASS:-guest}
+      Messaging__address: rabbitmq
+      ServiceManager__baseurl: http://servicemanager:9090
+    ports:
+      - "80:8080"
+    networks:
+      - pefi-network
+
+  dynamicdns:
+    image: ghcr.io/petefield/pefi.dynamicdns:latest
+    restart: unless-stopped
+    depends_on:
+      - rabbitmq
+      - servicemanager
+    environment:
+      Messaging__username: ${RABBITMQ_USER:-guest}
+      Messaging__password: ${RABBITMQ_PASS:-guest}
+      Messaging__address: rabbitmq
+      ServiceManager__baseurl: http://servicemanager:9090
+      DNS__Domain: ${DNS_DOMAIN}
+      DNS__HomeHostname: ${DNS_HOME_HOSTNAME}
+      DNS__ApiToken: ${DNS_API_TOKEN}
+      DNS__CheckIntervalMinutes: ${DNS_CHECK_INTERVAL_MINUTES:-2}
+    networks:
+      - pefi-network
+
+volumes:
+  mongo-data:
+
+networks:
+  pefi-network:
+    driver: bridge
